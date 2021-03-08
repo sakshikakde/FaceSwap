@@ -68,3 +68,19 @@ def PlotaTri(Face_, tri, colour = (0,255,255)):
     Face = cv2.line(Face, b1, c1, colour, 2)
     Face = cv2.line(Face, c1, a1, colour, 2)    
     return Face
+
+def drawMarkers(Face1, facemarks, box):
+    
+    Face = Face1.copy()
+    (x,y,w,h) = box
+    cv2.rectangle(Face,(x,y),(x+w,y+h),(0,255,0),2)
+    
+    for (a,b) in facemarks:
+        cv2.circle(Face,(a,b),2,(255,0,0),-1)
+    return Face
+
+
+def ptonFace(Face1,pt):
+    Face = Face1.copy()
+    Face = cv2.circle(Face,tuple(pt),2,(255,0,0),3)
+    return Face
