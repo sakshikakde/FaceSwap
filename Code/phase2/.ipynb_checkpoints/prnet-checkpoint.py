@@ -16,22 +16,21 @@ from scipy.interpolate import interp2d
 import cv2
 from phase2.api import PRN
 
+
 from utils.render import render_texture
 
 
-def FaceSwap_DL(prn, image, ref_image):
+def FaceSwap_DL(prn, pos, ref_pos, image, ref_image):
     # read image
     [h, w, _] = image.shape
 
     #-- 1. 3d reconstruction -> get texture. 
-    pos = prn.process(image) 
     vertices = prn.get_vertices(pos)
     image = image/255.
     texture = cv2.remap(image, pos[:,:,:2].astype(np.float32), None, interpolation=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT,borderValue=(0))
     
     #-- 2. Texture Editing
     # change whole face(face swap)    # texture from another image or a processed texture
-    ref_pos = prn.process(ref_image)
     ref_image = ref_image/255.
     ref_texture = cv2.remap(ref_image, ref_pos[:,:,:2].astype(np.float32), None, interpolation=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT,borderValue=(0))
     ref_vertices = prn.get_vertices(ref_pos)

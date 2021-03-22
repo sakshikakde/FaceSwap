@@ -17,9 +17,8 @@ import dlib
 
 
 def ThinPlateKernalFunc(set1, set2):
-    # r = np.abs(set1[0] -  set2[0]) + np.abs(set1[1] - set2[1])
     r = np.linalg.norm((np.array(set1) - np.array(set2)))
-    U = (r**2) * np.log(r**2)
+    U = (r**2) * np.log(r) 
     if r == 0:
         U = 0
     return U
@@ -86,8 +85,10 @@ def warpFaces_TPS(face1, face2, M, face_markers_2):
     t2 = np.square(ay - by)
 
     R = np.sqrt(t1 + t2)
-    U = np.square(R) * np.log(np.square(R))
-    U[R == 0] = 0 #perfect"
+  
+    # U = np.square(R) * np.log(np.square(R))
+    U = np.square(R) * np.log(R)
+    U[R == 0] = 0 #perfect
 
     MX = Mx[0:68, 0].T
     Ux = MX * U #perfect
@@ -107,13 +108,57 @@ def warpFaces_TPS(face1, face2, M, face_markers_2):
     Y[Y < 0] = 0
 
     warped_face = np.zeros(face2.shape)
-#     print(np.max(Yi.ravel()), np.max(Xi.ravel()))
-#     print(np.max(Y.ravel()), np.max(X.ravel()))
     warped_face[Yi.ravel(), Xi.ravel()] = face1[Y, X]
 
     return np.uint8(warped_face)
 
-def FaceSwap_TPS(Face1,Face2, box1,box2, predictor):
+def FaceSwap1_TPS(Face1_crop, Face1marks_shifted, Face2, box2, predictor, use_filter, first_time, old_markers, moving_average_position, moving_average_del):
+    ## face1 - src; face2 - dst
+    
+    ##### Get the Face fiducials #####
+    facemarks2, _, _ = FaceDetector(Face2, box2, predictor)  
+    if use_filter:
+        print("Using filter")
+        moving_average_position.addMarkers(facemarks2)
+        facemarks2_averaged = moving_average_position.getAverage()  
+        facemarks2 = facemarks2_averaged
+        
+        delthresh = 1
+        if not first_time:
+            del_markers = facemarks2 - old_markers
+            del_markers[del_markers > delthresh] = delthresh
+            del_markers[del_markers < -delthresh] = -delthresh
+
+            moving_average_del.addMarkers(del_markers)
+            del_markers = moving_average_del.getAverage()
+
+            facemarks2 = (old_markers + del_markers).astype(int)
+            
+    #get boundng box and crop
+    (x2, y2, w2, h2) = cv2.boundingRect(facemarks2) #BoundingBoxFrame
+    facemarks2_shifted = facemarks2 - (x2, y2)
+    l2 = np.maximum(h2, w2) + 10 #to get square
+    Face2_crop  = Face2[y2:y2+l2, x2:x2+l2]  
+   
+    # Get the warpedFace using TPS 
+    M  = getParameters(Face1marks_shifted, facemarks2_shifted)
+    warped_face = warpFaces_TPS(Face1_crop, Face2_crop, M, facemarks2_shifted)
+
+    #mask
+    mask_warped_face = np.zeros(warped_face.shape, dtype = np.float32)
+    shifted_face2_hull = cv2.convexHull(facemarks2_shifted, returnPoints = True)
+    cv2.fillConvexPoly(mask_warped_face, np.int32(shifted_face2_hull), (255, 255, 255))
+
+    #swap
+    center = ((int(w2/2), int(h2/2)))
+    seamless_warped_face = cv2.seamlessClone(warped_face, Face2_crop, np.uint8(mask_warped_face), center, cv2.NORMAL_CLONE)
+    Face_swaped = Face2.copy()
+    Face_swaped[y2:y2+l2,x2:x2+l2] = seamless_warped_face
+    
+    return Face_swaped, facemarks2
+
+
+def Swap_TPS(Face1,Face2, box1,box2, predictor):
     ## face1 - src; face2 - dst
     
     ##### Get the Face fiducials #####
@@ -134,12 +179,12 @@ def FaceSwap_TPS(Face1,Face2, box1,box2, predictor):
     mask_warped_face,_ = Mask(warped_face, shifted_FaceMarks2)
     mask_warped_face = np.int32(mask_warped_face/mask_warped_face.max())
     warped_face = warped_face * mask_warped_face
-    alpha = (1.0, 1.0, 1.0) - mask_warped_face
+#     alpha = (1.0, 1.0, 1.0) - mask_warped_face
     
-    WarpedFace = Face1.copy() # get a copy of dst face
+#     WarpedFace = Face1.copy() # get a copy of dst face
     WarpedFace = np.zeros_like(Face1) # or just zeros in same shape
     x,y,w,h = BoundingBox2
-    WarpedFace[y:y+h, x:x+w] = WarpedFace[y:y+h, x:x+w] * alpha
+#     WarpedFace[y:y+h, x:x+w] = WarpedFace[y:y+h, x:x+w] * alpha
     WarpedFace[y:y+h, x:x+w] = WarpedFace[y:y+h, x:x+w] + warped_face
     #####------#####
     
@@ -157,3 +202,7 @@ def FaceSwap_TPS(Face1,Face2, box1,box2, predictor):
     return WarpedFace, Face1_print, Face2_print
 
 
+def FaceSwap2_TPS(frame, box1, box2, predictor):
+    WarpedFace_tmp, _,_ = Swap_TPS(frame, frame, box1, box2, predictor)
+    WarpedFace, _,_ = Swap_TPS(frame, WarpedFace_tmp,box2, box1, predictor)
+    return WarpedFace

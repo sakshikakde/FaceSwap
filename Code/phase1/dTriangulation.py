@@ -70,7 +70,12 @@ def affineTransform(src, src_tri, dst_tri, dst, iscv2 = False):
         B = np.array([[ax,bx,cx],
                       [ay,by,cy],
                       [1, 1, 1]])
-        B_inv = np.linalg.inv(B)
+        
+        if np.linalg.det(B)!=0:
+            B_inv = np.linalg.inv(B)
+        else:    
+            B_inv = np.linalg.pinv(B)
+#             B_inv = np.linalg.lstsq(B, np.eye(3, 3))[0]
 
         ## create [x,y,1] -> the coordinates of the box which outscribe the triangle.
         dstBox = cv2.boundingRect(np.float32(dst_tri))
@@ -115,9 +120,10 @@ def affineTransform(src, src_tri, dst_tri, dst, iscv2 = False):
         xyz_a = xyz_a.T
         Xa, Ya,z = xyz_a[:,0], xyz_a[:,1], xyz_a[:,2] 
         Xa, Ya = np.int32(Xa/z), np.int32(Ya/z)
-        
+        h1,w1 = src.shape[:2]
         for xb,yb,xa,ya in zip(Xb,Yb,Xa,Ya):
-            dst[int(yb),int(xb)] = src[int(ya),int(xa)]
+            if (ya>=0) and (ya<h1) and (xa>=0) and (xa<w1):
+                dst[int(yb),int(xb)] = src[int(ya),int(xa)]
         
     else:
         dst = affineWarping(src, src_tri, dst_tri, (w2,h2))
@@ -205,11 +211,25 @@ def affineWarping(src, srcTri, dstTri, size) :
 
     return dst
 
-def FaceSwap_delTri(Face1,Face2, box1,box2, predictor):
+def FaceSwap1_delTri(Face1, facemarks1, Face2, box2, predictor, use_filter, first_time, old_markers, moving_average_position, moving_average_del):
     
-    facemarks1, BoundingBox1, shifted_FaceMarks1 = FaceDetector(Face1, box1, predictor)
-    facemarks2, BoundingBox2, shifted_FaceMarks2 = FaceDetector(Face2, box2, predictor)    
-    #####------#####
+    ##### Get the Face fiducials #####
+    facemarks2, _, _ = FaceDetector(Face2, box2, predictor)  
+    if use_filter:
+        print("Using filter")
+        moving_average_position.addMarkers(facemarks2)
+        facemarks2_averaged = moving_average_position.getAverage()  
+        facemarks2 = facemarks2_averaged
+
+        if not first_time:
+            del_markers = facemarks2 - old_markers
+            del_markers[del_markers > 3] = 3
+            del_markers[del_markers < -3] = -3
+
+            moving_average_del.addMarkers(del_markers)
+            del_markers = moving_average_del.getAverage()
+
+            facemarks2 = (old_markers + del_markers).astype(int)
 
     ## find the common delauney triangles in both faces using tri_indices
     delTri1 , delTri2 = getMatchingTriangles(Face2, facemarks2, facemarks1)
@@ -228,8 +248,37 @@ def FaceSwap_delTri(Face1,Face2, box1,box2, predictor):
     WarpedFace = cv2.seamlessClone(np.uint16(WarpedFace), Face2, mask, tuple([cx,cy]), cv2.NORMAL_CLONE)
     #####------#####
     
-    Face1_print = drawMarkers(Face1, facemarks1, BoundingBox1)
-    Face2_print = drawMarkers(Face2, facemarks2, BoundingBox2)
+    # Face1_print = drawMarkers(Face1, facemarks1, BoundingBox1)
+    # Face2_print = drawMarkers(Face2, facemarks2, BoundingBox2)
     
-    return WarpedFace, Face1_print, Face2_print
+    return WarpedFace, facemarks2
 
+
+def FaceSwap2_delTri(frame, box1, box2, predictor):
+    
+    facemarks1, BoundingBox1, shifted_FaceMarks1 = FaceDetector(frame, box1, predictor)
+    facemarks2, BoundingBox2, shifted_FaceMarks2 = FaceDetector(frame, box2, predictor)
+
+    ### del Triangles ### 
+    # find the common delauney triangles in both faces using tri_indices    
+    delTri1 , delTri2 = getMatchingTriangles(frame, facemarks2, facemarks1)
+        
+    ## warp all triangles from source to destination
+    WarpedFace = frame.copy()
+    for tri1,tri2 in zip(delTri1,delTri2):
+        WarpTriangles(frame,WarpedFace, tri1,tri2, False)
+        WarpTriangles(frame,WarpedFace, tri2,tri1, False)
+    #####------#####
+    
+    ### Perform Poisson Blending to paste the image ###
+    mask, box = Mask(frame,facemarks2) # get the mask of the face and it's bounding box
+    x,y,w,h = box  
+    cx, cy = (2*x+w) //2, (2*y+ h) //2   # get the center
+    WarpedFace_tmp = cv2.seamlessClone(np.uint16(WarpedFace), frame, mask, tuple([cx,cy]), cv2.NORMAL_CLONE)        
+
+    mask, box = Mask(frame,facemarks1) # get the mask of the face and it's bounding box
+    x,y,w,h = box  
+    cx, cy = (2*x+w) //2, (2*y+ h) //2   # get the center
+    WarpedFace = cv2.seamlessClone(np.uint16(WarpedFace), WarpedFace_tmp, mask, tuple([cx,cy]), cv2.NORMAL_CLONE)        
+    
+    return WarpedFace

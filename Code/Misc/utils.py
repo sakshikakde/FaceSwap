@@ -73,7 +73,7 @@ def drawMarkers(Face1, facemarks, box):
     
     Face = Face1.copy()
     (x,y,w,h) = box
-    cv2.rectangle(Face,(x,y),(x+w,y+h),(0,255,0),2)
+    # cv2.rectangle(Face,(x,y),(x+w,y+h),(0,255,0),2)
     
     for (a,b) in facemarks:
         cv2.circle(Face,(a,b),2,(255,0,0),-1)
@@ -84,3 +84,21 @@ def ptonFace(Face1,pt):
     Face = Face1.copy()
     Face = cv2.circle(Face,tuple(pt),2,(255,0,0),3)
     return Face
+
+def smoothenFrames(current_frame, past_frame):
+    new_frame = (0.4 * past_frame + 0.6 * current_frame).astype(int)
+    del_frame = new_frame - past_frame
+    del_frame[del_frame > 100] = 100
+    # del_frame[del_frame < 100] = -100
+    new_frame = past_frame + del_frame
+    
+    return np.uint8(new_frame), del_frame
+
+def adjustGamma(image, gamma=1.0):
+	# build a lookup table mapping the pixel values [0, 255] to
+	# their adjusted gamma values
+	invGamma = 1.0 / gamma
+	table = np.array([((i / 255.0) ** invGamma) * 255
+		for i in np.arange(0, 256)]).astype("uint8")
+	# apply gamma correction using the lookup table
+	return cv2.LUT(image, table)

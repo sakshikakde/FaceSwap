@@ -11,7 +11,17 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow.contrib.layers as tcl
 from tensorflow.contrib.framework import arg_scope
 
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+session = tf.Session(config=config)
 
+print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
+
+if (len(tf.config.experimental.list_physical_devices('GPU')) > 0) :
+       print("################################################ RUNNING IN GPU ")
+else:
+       print("################################################ NO GPU FOUND" )
+        
 #########################################################################################################
 #########################################################################################################
 #########################################################################################################
@@ -242,7 +252,85 @@ class PRN:
         pos = np.reshape(vertices.T, [self.resolution_op, self.resolution_op, 3])
         
         return pos
+    
+    
+    def process2(self, input, image_info = None):
+        ''' process image with crop operation.
+        Args:
+            input: (h,w,3) array or str(image path). image value range:1~255. 
+            image_info(optional): the bounding box information of faces. if None, will use dlib to detect face. 
+
+        Returns:
+            pos: the 3D position map. (256, 256, 3).
+        '''
+        if isinstance(input, str):
+            try:
+                image = imread(input)
+            except IOError:
+                print("error opening file: ", input)
+                return None
+        else:
+            image = input
+
+        if image.ndim < 3:
+            image = np.tile(image[:,:,np.newaxis], [1,1,3])
+
+        if image_info is not None:
+            if np.max(image_info.shape) > 4: # key points to get bounding box
+                kpt = image_info
+                if kpt.shape[0] > 3:
+                    kpt = kpt.T
+                left = np.min(kpt[0, :]); right = np.max(kpt[0, :]); 
+                top = np.min(kpt[1,:]); bottom = np.max(kpt[1,:])
+            else:  # bounding box
+                bbox = image_info
+                left = bbox[0]; right = bbox[1]; top = bbox[2]; bottom = bbox[3]
+            old_size = (right - left + bottom - top)/2
+            center = np.array([right - (right - left) / 2.0, bottom - (bottom - top) / 2.0])
+            size = int(old_size*1.6)
+        else:
+            detected_faces = self.dlib_detect(image)
+            print(len(detected_faces))
             
+            if len(detected_faces)>2:
+                print('More than 2 faces found')
+                detected_faces = detected_faces[:2]
+            if len(detected_faces) != 2:
+                print('warning: no detected face')
+                return None
+        poses= []
+        for d in detected_faces:
+            d=d.rect
+#         d = detected_faces[0].rect ## only use the first detected face (assume that each input image only contains one face)
+            left = d.left(); right = d.right(); top = d.top(); bottom = d.bottom()
+            old_size = (right - left + bottom - top)/2
+            center = np.array([right - (right - left) / 2.0, bottom - (bottom - top) / 2.0 + old_size*0.14])
+            size = int(old_size*1.58)
+
+            # crop image
+            src_pts = np.array([[center[0]-size/2, center[1]-size/2], [center[0] - size/2, center[1]+size/2], [center[0]+size/2, center[1]-size/2]])
+            DST_PTS = np.array([[0,0], [0,self.resolution_inp - 1], [self.resolution_inp - 1, 0]])
+            tform = estimate_transform('similarity', src_pts, DST_PTS)
+
+            image = image/255.
+            cropped_image = warp(image, tform.inverse, output_shape=(self.resolution_inp, self.resolution_inp))
+
+            # run our net
+            #st = time()
+            cropped_pos = self.net_forward(cropped_image)
+            #print 'net time:', time() - st
+
+            # restore 
+            cropped_vertices = np.reshape(cropped_pos, [-1, 3]).T
+            z = cropped_vertices[2,:].copy()/tform.params[0,0]
+            cropped_vertices[2,:] = 1
+            vertices = np.dot(np.linalg.inv(tform.params), cropped_vertices)
+            vertices = np.vstack((vertices[:2,:], z))
+            pos = np.reshape(vertices.T, [self.resolution_op, self.resolution_op, 3])
+            poses.append(pos)
+        return poses
+
+    
     def get_landmarks(self, pos):
         '''
         Args:
