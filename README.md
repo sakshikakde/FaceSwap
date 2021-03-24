@@ -13,6 +13,8 @@ For PRNet, copy the
 Copy the pretrained model file to Code/phase2/Data/net-data/ 
 
 
+To run the program cd Code/
+
 # delTri:
 ## Image on face:
 ```
@@ -50,3 +52,4 @@ python3 Wrapper.py --method PRNet --DataPath ../Data/TestSet/ --VideoFileName Te
 ```
 python3 Wrapper.py --method PRNet --DataPath ../Data/TestSet/ --VideoFileName Test2.mp4  --SavePath Test2OutputPRNet.mp4
 ```
+
